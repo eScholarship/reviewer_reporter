@@ -36,5 +36,5 @@ The report is then available from Manager → Plugins within a journal, at
 ## Tests
 
 ```
-python src/manage.py test plugins.reviewer_reporter
+python src/manage.py test reviewer_reporter
 ```
