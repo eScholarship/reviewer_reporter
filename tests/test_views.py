@@ -108,6 +108,13 @@ class TestReviewerReporterAccess(TestCase):
         cls.regular_user.is_active = True
         cls.regular_user.save()
 
+        cls.staff_user = helpers.create_user(
+            "reviewer_reporter_staff@janeway.systems",
+            is_staff=True,
+            is_active=True,
+        )
+        cls.staff_user.save()
+
     def test_press_level_request_is_not_found(self):
         request = helpers.get_request(
             user=self.editor,
@@ -143,3 +150,15 @@ class TestReviewerReporterAccess(TestCase):
         response = views.reviewer_reporter(request)
         self.assertEqual(response.status_code, 302)
         self.assertIn("login", response.url)
+
+    def test_staff_user_cannot_reach_press_level_report(self):
+        # Regression guard: before the @has_journal decorator, a Django staff
+        # account could reach this view at press level (request.journal is None)
+        # via editor_user_required's staff_override and Account.check_role's
+        # staff_override, and export every review assignment on the install.
+        request = helpers.get_request(
+            user=self.staff_user,
+            press=self.press,
+        )
+        with self.assertRaises(Http404):
+            views.reviewer_reporter(request)
