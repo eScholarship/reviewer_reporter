@@ -14,7 +14,11 @@ def reviewer_reporter(request):
             end_date = form.cleaned_data['end_date']
 
             # Fetch peer review data
-            review_requests = get_peer_review_data(start_date, end_date) 
+            review_requests = get_peer_review_data(
+                request.journal,
+                start_date,
+                end_date,
+            ) 
 
             # Generate CSV response
             response = generate_csv_response(review_requests)
@@ -28,10 +32,11 @@ def reviewer_reporter(request):
     }
     return render(request, 'reviewer_reporter/report.html', context)
 
-def get_peer_review_data(start_date, end_date):
+def get_peer_review_data(journal, start_date, end_date):
     review_requests = review_models.ReviewAssignment.objects.filter(
-        date_requested__gte=start_date,
-        date_requested__lte=end_date
+        article__journal=journal,
+        date_requested__date__gte=start_date,
+        date_requested__date__lte=end_date,
     ).select_related('reviewer', 'article')
 
     # Prepare data for CSV export
