@@ -5,6 +5,7 @@ from .forms import ReviewerReporterForm
 from review import models as review_models
 from security.decorators import editor_user_required, has_journal
 
+
 @has_journal
 @editor_user_required
 def reviewer_reporter(request):
@@ -19,7 +20,7 @@ def reviewer_reporter(request):
                 request.journal,
                 start_date,
                 end_date,
-            ) 
+            )
 
             # Generate CSV response
             response = generate_csv_response(review_requests)
