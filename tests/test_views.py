@@ -1,4 +1,6 @@
+import csv
 import datetime
+import io
 
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import PermissionDenied
@@ -60,10 +62,15 @@ class TestReviewerReporterScoping(TestCase):
             journal=cls.journal_two,
         )
 
-        cls.today = timezone.now().date()
+        cls.today = timezone.localdate()
         cls.yesterday = cls.today - datetime.timedelta(days=1)
 
     def test_only_returns_assignments_from_the_given_journal(self):
+        # Asserting on article.pk rather than reviewer name is deliberate:
+        # helpers.create_review_assignment defaults to fixture users with
+        # fixed emails looked up by Account.objects.get(email=...), so both
+        # journals' assignments share the same reviewer Account. An
+        # assertion on reviewer name could never fail here.
         data = views.get_peer_review_data(
             self.journal_one,
             self.yesterday,
@@ -105,6 +112,14 @@ class TestReviewerReporterAccess(TestCase):
             cls.journal_one,
             email="reviewer_reporter_editor@janeway.systems",
         )
+        cls.journal_two_editor = helpers.create_editor(
+            cls.journal_two,
+            email="reviewer_reporter_editor_two@janeway.systems",
+        )
+        cls.section_editor = helpers.create_section_editor(
+            cls.journal_one,
+            email="reviewer_reporter_section_editor@janeway.systems",
+        )
         cls.regular_user = helpers.create_user(
             "reviewer_reporter_regular@janeway.systems",
         )
@@ -135,9 +150,64 @@ class TestReviewerReporterAccess(TestCase):
         response = views.reviewer_reporter(request)
         self.assertEqual(response.status_code, 200)
 
+    def test_post_returns_csv_scoped_to_the_current_journal(self):
+        # Covers the view-to-helper wiring (request.journal is what actually
+        # gets passed to get_peer_review_data) and generate_csv_response's
+        # output, neither of which is exercised anywhere else.
+        assignment_one = helpers.create_review_assignment(journal=self.journal_one)
+        assignment_two = helpers.create_review_assignment(journal=self.journal_two)
+        # Sanity check: if these pks ever collided the assertions below
+        # would pass vacuously.
+        self.assertNotEqual(assignment_one.article.pk, assignment_two.article.pk)
+
+        today = timezone.localdate()
+        request = helpers.get_request(
+            user=self.editor,
+            press=self.press,
+            journal=self.journal_one,
+        )
+        request.method = "POST"
+        request.POST = {
+            "start_date": (today - datetime.timedelta(days=1)).isoformat(),
+            "end_date": (today + datetime.timedelta(days=1)).isoformat(),
+        }
+
+        response = views.reviewer_reporter(request)
+
+        self.assertIn("reviewer_report.csv", response["Content-Disposition"])
+        content = response.content.decode()
+        # Parse the CSV rather than substring-matching the raw content: a
+        # single-digit pk can otherwise turn up inside an unrelated date
+        # field and produce a false positive.
+        rows = list(csv.reader(io.StringIO(content)))
+        manuscript_numbers = [row[1] for row in rows[1:]]
+        self.assertIn(str(assignment_one.article.pk), manuscript_numbers)
+        self.assertNotIn(str(assignment_two.article.pk), manuscript_numbers)
+
     def test_regular_user_is_denied(self):
         request = helpers.get_request(
             user=self.regular_user,
+            press=self.press,
+            journal=self.journal_one,
+        )
+        with self.assertRaises(PermissionDenied):
+            views.reviewer_reporter(request)
+
+    def test_section_editor_is_denied(self):
+        # editor_user_required only admits section editors when an
+        # article_id kwarg is present; this view takes none, so a section
+        # editor falls through to the deny branch.
+        request = helpers.get_request(
+            user=self.section_editor,
+            press=self.press,
+            journal=self.journal_one,
+        )
+        with self.assertRaises(PermissionDenied):
+            views.reviewer_reporter(request)
+
+    def test_editor_of_a_different_journal_is_denied(self):
+        request = helpers.get_request(
+            user=self.journal_two_editor,
             press=self.press,
             journal=self.journal_one,
         )
@@ -173,7 +243,7 @@ class TestReviewerReporterQueryCount(TestCase):
         cls.press = helpers.create_press()
         cls.press.save()
         cls.journal_one, cls.journal_two = helpers.create_journals()
-        cls.today = timezone.now().date()
+        cls.today = timezone.localdate()
 
     def test_query_count_does_not_grow_with_assignments(self):
         helpers.create_review_assignment(journal=self.journal_one)
