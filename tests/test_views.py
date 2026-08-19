@@ -1,5 +1,8 @@
 import datetime
 
+from django.contrib.auth.models import AnonymousUser
+from django.core.exceptions import PermissionDenied
+from django.http import Http404
 from django.test import TestCase
 from django.utils import timezone
 
@@ -86,3 +89,57 @@ class TestReviewerReporterScoping(TestCase):
             long_ago,
         )
         self.assertEqual(data, [])
+
+
+class TestReviewerReporterAccess(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.press = helpers.create_press()
+        cls.press.save()
+        cls.journal_one, cls.journal_two = helpers.create_journals()
+
+        cls.editor = helpers.create_editor(
+            cls.journal_one,
+            email="reviewer_reporter_editor@janeway.systems",
+        )
+        cls.regular_user = helpers.create_user(
+            "reviewer_reporter_regular@janeway.systems",
+        )
+        cls.regular_user.is_active = True
+        cls.regular_user.save()
+
+    def test_press_level_request_is_not_found(self):
+        request = helpers.get_request(
+            user=self.editor,
+            press=self.press,
+        )
+        with self.assertRaises(Http404):
+            views.reviewer_reporter(request)
+
+    def test_editor_can_access_the_report(self):
+        request = helpers.get_request(
+            user=self.editor,
+            press=self.press,
+            journal=self.journal_one,
+        )
+        response = views.reviewer_reporter(request)
+        self.assertEqual(response.status_code, 200)
+
+    def test_regular_user_is_denied(self):
+        request = helpers.get_request(
+            user=self.regular_user,
+            press=self.press,
+            journal=self.journal_one,
+        )
+        with self.assertRaises(PermissionDenied):
+            views.reviewer_reporter(request)
+
+    def test_anonymous_user_is_redirected_to_login(self):
+        request = helpers.get_request(
+            user=AnonymousUser(),
+            press=self.press,
+            journal=self.journal_one,
+        )
+        response = views.reviewer_reporter(request)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("login", response.url)

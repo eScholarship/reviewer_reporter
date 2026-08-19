@@ -3,8 +3,9 @@ from django.http import HttpResponse
 from django.shortcuts import render
 from .forms import ReviewerReporterForm
 from review import models as review_models
-from security.decorators import editor_user_required
+from security.decorators import editor_user_required, has_journal
 
+@has_journal
 @editor_user_required
 def reviewer_reporter(request):
     if request.method == 'POST':
