@@ -2,12 +2,15 @@ import datetime
 
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import PermissionDenied
+from django.db import connection
 from django.http import Http404
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from plugins.reviewer_reporter import forms
 from plugins.reviewer_reporter import views
+from review import models as review_models
 from utils.testing import helpers
 
 
@@ -162,3 +165,40 @@ class TestReviewerReporterAccess(TestCase):
         )
         with self.assertRaises(Http404):
             views.reviewer_reporter(request)
+
+
+class TestReviewerReporterQueryCount(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.press = helpers.create_press()
+        cls.press.save()
+        cls.journal_one, cls.journal_two = helpers.create_journals()
+        cls.today = timezone.now().date()
+
+    def test_query_count_does_not_grow_with_assignments(self):
+        helpers.create_review_assignment(journal=self.journal_one)
+
+        with CaptureQueriesContext(connection) as one_assignment:
+            views.get_peer_review_data(self.journal_one, self.today, self.today)
+
+        for _ in range(3):
+            helpers.create_review_assignment(journal=self.journal_one)
+
+        with CaptureQueriesContext(connection) as four_assignments:
+            views.get_peer_review_data(self.journal_one, self.today, self.today)
+
+        self.assertEqual(len(one_assignment), len(four_assignments))
+
+    def test_rating_is_reported_when_present(self):
+        assignment = helpers.create_review_assignment(journal=self.journal_two)
+        review_models.ReviewerRating.objects.create(
+            assignment=assignment,
+            rating=7,
+        )
+        data = views.get_peer_review_data(self.journal_two, self.today, self.today)
+        self.assertEqual(data[0][8], 7)
+
+    def test_rating_is_na_when_absent(self):
+        helpers.create_review_assignment(journal=self.journal_two)
+        data = views.get_peer_review_data(self.journal_two, self.today, self.today)
+        self.assertEqual(data[0][8], "N/A")
