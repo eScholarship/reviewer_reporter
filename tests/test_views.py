@@ -202,3 +202,34 @@ class TestReviewerReporterQueryCount(TestCase):
         helpers.create_review_assignment(journal=self.journal_two)
         data = views.get_peer_review_data(self.journal_two, self.today, self.today)
         self.assertEqual(data[0][8], "N/A")
+
+
+class TestReviewerReporterTemplate(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.press = helpers.create_press()
+        cls.press.save()
+        cls.journal_one, cls.journal_two = helpers.create_journals()
+        cls.editor = helpers.create_editor(
+            cls.journal_one,
+            email="reviewer_reporter_template@janeway.systems",
+        )
+
+    def _render(self):
+        request = helpers.get_request(
+            user=self.editor,
+            press=self.press,
+            journal=self.journal_one,
+        )
+        response = views.reviewer_reporter(request)
+        return response.content.decode()
+
+    def test_submit_control_is_a_styled_button(self):
+        self.assertIn('<button type="submit" class="button">', self._render())
+
+    def test_title_is_not_duplicated_in_the_body(self):
+        content = self._render()
+        self.assertEqual(content.count("Reviewer Reporter</h1>"), 1)
+
+    def test_description_is_rendered(self):
+        self.assertIn("Export a CSV of every review request", self._render())
