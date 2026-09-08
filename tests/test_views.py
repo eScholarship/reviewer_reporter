@@ -6,7 +6,7 @@ from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import PermissionDenied
 from django.db import connection
 from django.http import Http404
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
@@ -141,14 +141,9 @@ class TestReviewerReporterAccess(TestCase):
         with self.assertRaises(Http404):
             views.reviewer_reporter(request)
 
-    def test_editor_can_access_the_report(self):
-        request = helpers.get_request(
-            user=self.editor,
-            press=self.press,
-            journal=self.journal_one,
-        )
-        response = views.reviewer_reporter(request)
-        self.assertEqual(response.status_code, 200)
+    # The positive access case lives in TestReviewerReporterTemplate, which
+    # drives it through the test client — it renders the page, and rendering
+    # tests belong on the real middleware stack.
 
     def test_post_returns_csv_scoped_to_the_current_journal(self):
         # Covers the view-to-helper wiring (request.journal is what actually
@@ -274,7 +269,16 @@ class TestReviewerReporterQueryCount(TestCase):
         self.assertEqual(data[0][8], "N/A")
 
 
+@override_settings(ROOT_URLCONF="plugins.reviewer_reporter.tests.test_urls")
 class TestReviewerReporterTemplate(TestCase):
+    """Rendering tests, driven through the real request/response cycle.
+
+    These go through the test client rather than calling the view directly, so
+    the request passes the middleware the template depends on — the admin base
+    template loops over `messages`, which only `MessageMiddleware` populates.
+    See tests/test_urls.py for why a separate URL configuration is needed.
+    """
+
     @classmethod
     def setUpTestData(cls):
         cls.press = helpers.create_press()
@@ -285,14 +289,20 @@ class TestReviewerReporterTemplate(TestCase):
             email="reviewer_reporter_template@janeway.systems",
         )
 
+    def setUp(self):
+        self.client.force_login(self.editor)
+
     def _render(self):
-        request = helpers.get_request(
-            user=self.editor,
-            press=self.press,
-            journal=self.journal_one,
-        )
-        response = views.reviewer_reporter(request)
+        # journal_one's domain is "testserver", the test client's default host,
+        # so the journal resolves without a path prefix.
+        response = self.client.get("/plugins/reviewer-reporter/")
+        self.assertEqual(response.status_code, 200)
         return response.content.decode()
+
+    def test_editor_can_load_the_report_page(self):
+        response = self.client.get("/plugins/reviewer-reporter/")
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "reviewer_reporter/report.html")
 
     def test_submit_control_is_a_styled_button(self):
         self.assertIn('<button type="submit" class="button">', self._render())
