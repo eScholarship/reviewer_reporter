@@ -3,8 +3,10 @@ from django.http import HttpResponse
 from django.shortcuts import render
 from .forms import ReviewerReporterForm
 from review import models as review_models
-from security.decorators import editor_user_required
+from security.decorators import editor_user_required, has_journal
 
+
+@has_journal
 @editor_user_required
 def reviewer_reporter(request):
     if request.method == 'POST':
@@ -14,7 +16,11 @@ def reviewer_reporter(request):
             end_date = form.cleaned_data['end_date']
 
             # Fetch peer review data
-            review_requests = get_peer_review_data(start_date, end_date) 
+            review_requests = get_peer_review_data(
+                request.journal,
+                start_date,
+                end_date,
+            )
 
             # Generate CSV response
             response = generate_csv_response(review_requests)
@@ -28,46 +34,43 @@ def reviewer_reporter(request):
     }
     return render(request, 'reviewer_reporter/report.html', context)
 
-def get_peer_review_data(start_date, end_date):
+def get_peer_review_data(journal, start_date, end_date):
     review_requests = review_models.ReviewAssignment.objects.filter(
-        date_requested__gte=start_date,
-        date_requested__lte=end_date
-    ).select_related('reviewer', 'article')
+        article__journal=journal,
+        date_requested__date__gte=start_date,
+        date_requested__date__lte=end_date,
+    ).select_related('reviewer', 'article', 'reviewerrating')
 
     # Prepare data for CSV export
     data = []
-    for request in review_requests:
-        reviewer_name = request.reviewer.full_name() if request.reviewer else "N/A"
-        manuscript_number = request.article.pk
-        request_date = request.date_requested.strftime('%Y-%m-%d')
+    for assignment in review_requests:
+        reviewer_name = assignment.reviewer.full_name() if assignment.reviewer else "N/A"
+        manuscript_number = assignment.article.pk
+        request_date = assignment.date_requested.strftime('%Y-%m-%d')
 
-        # Fetch the average rating for this article only
-        if request.reviewer:
-            ratings = review_models.ReviewerRating.objects.filter(assignment=request).values_list('rating', flat=True)
-            review_rating = sum(ratings) / len(ratings) if ratings else "N/A"
-        else:
-            review_rating = "N/A"
+        rating = getattr(assignment, 'reviewerrating', None)
+        review_rating = rating.rating if rating else "N/A"
 
         # Determine review request status and dates
-        if request.date_complete and request.decision != 'withdrawn':
+        if assignment.date_complete and assignment.decision != 'withdrawn':
             status = "Completed"
-            status_date = request.date_complete.strftime('%Y-%m-%d')
+            status_date = assignment.date_complete.strftime('%Y-%m-%d')
             withdraw_date = ""
-        elif request.date_declined:
+        elif assignment.date_declined:
             status = "Declined"
-            status_date = request.date_declined.strftime('%Y-%m-%d')
+            status_date = assignment.date_declined.strftime('%Y-%m-%d')
             withdraw_date = ""
-        elif request.decision == 'withdrawn':
+        elif assignment.decision == 'withdrawn':
             status = "Withdrawn"
             status_date = ""
-            withdraw_date = request.date_complete.strftime('%Y-%m-%d') if request.date_complete else ""
+            withdraw_date = assignment.date_complete.strftime('%Y-%m-%d') if assignment.date_complete else ""
         else:
             status = "Pending"
             status_date = ""
             withdraw_date = ""
 
-        accept_date = request.date_accepted.strftime('%Y-%m-%d') if request.date_accepted else ""
-        complete_date = request.date_complete.strftime('%Y-%m-%d') if request.date_complete and request.decision != 'withdrawn' else ""
+        accept_date = assignment.date_accepted.strftime('%Y-%m-%d') if assignment.date_accepted else ""
+        complete_date = assignment.date_complete.strftime('%Y-%m-%d') if assignment.date_complete and assignment.decision != 'withdrawn' else ""
 
         data.append([
             reviewer_name,

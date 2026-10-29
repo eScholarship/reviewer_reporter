@@ -2,13 +2,36 @@
 
 {% block title %}Reviewer Reporter{% endblock %}
 {% block title-section %}Reviewer Reporter{% endblock %}
+{% block title-sub %}Export a CSV of every review request sent for this journal in a given date range, listing the reviewer, manuscript, request status and rating.{% endblock %}
+
+{% block breadcrumbs %}
+    {{ block.super }}
+    <li>Reviewer Reporter</li>
+{% endblock %}
 
 {% block body %}
-<h1>Reviewer Reporter</h1>
-
-<form method="post"> 
-    {% csrf_token %}  {# Add CSRF token for security #}
-    {{ form }}
-    <button type="submit">Generate Report</button>
-</form>
+    <div class="box">
+        <div class="title-area">
+            <h2>Filter by Dates</h2>
+        </div>
+        <div class="content">
+            <div class="row expanded">
+                <form method="POST">
+                    {% csrf_token %}
+                    {{ form.errors }}
+                    <div class="large-3 columns">
+                        {{ form.start_date.label_tag }}
+                        {{ form.start_date }}
+                    </div>
+                    <div class="large-3 columns">
+                        {{ form.end_date.label_tag }}
+                        {{ form.end_date }}
+                    </div>
+                    <div class="large-3 columns end">
+                        <button type="submit" class="button">Generate Report</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
 {% endblock %}
